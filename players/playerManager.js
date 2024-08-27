@@ -149,24 +149,68 @@ class PlayerManager {
   async handleChat(player, message) {
     const playerObj = this.players.get(player.name);
 
+    // Comprobar si el jugador está autenticado
     if (!playerObj || !playerObj.isLogged) {
-      if (message.startsWith("!register ") || message.startsWith("!login ")) {
-        return this.handleAuthCommand(playerObj, message);
-      }
-      this.room.sendAnnouncement(
-        "[Server] Necesitas registrarte (!register) o iniciar sesión (!login) para chatear.",
-        player.id,
-        0xb4b4b4
-      );
-      return false;
-    }
-    switch (message) {
-      case "!elo":
-        this.handleEloCommand(player.id, playerObj);
-        return false;
-      default:
+      return this.handleUnauthenticatedChat(player, message);
     }
 
+    // Objeto con los comandos y sus funciones correspondientes
+    const commands = {
+      "!elo": () => this.handleEloCommand(player.id, playerObj),
+    };
+
+    // Comprobar si el mensaje es un comando
+    const command = Object.keys(commands).find((cmd) =>
+      message.startsWith(cmd)
+    );
+    if (command) {
+      commands[command]();
+      return false;
+    }
+
+    // Si no es un comando, procesar como chat normal
+    return this.sendFormattedChat(playerObj, message);
+  }
+
+  handleUnauthenticatedChat(player, message) {
+    if (message.startsWith("!register ") || message.startsWith("!login ")) {
+      return this.handleAuthCommand(player, message);
+    }
+
+    this.room.sendAnnouncement(
+      "[Server] Necesitas registrarte (!register) o iniciar sesión (!login) para chatear.",
+      player.id,
+      0xb4b4b4
+    );
+    return false;
+  }
+
+  async handleAuthCommand(player, message) {
+    const [command, password] = message.split(" ");
+    const authHandler = {
+      "!register": () => this.registerPlayer(player, password),
+      "!login": () => this.loginPlayer(player.name, password),
+    }[command];
+
+    if (authHandler) {
+      try {
+        await authHandler();
+        this.room.sendAnnouncement(
+          `[Server] Autenticación exitosa.`,
+          player.id,
+          0x00ff00
+        );
+      } catch (error) {
+        this.room.sendAnnouncement(
+          `[Server] Error de autenticación: ${error.message}`,
+          player.id,
+          0xff0000
+        );
+      }
+    }
+  }
+
+  async sendFormattedChat(playerObj, message) {
     const { rankString, color, style, vipPrefix } = await getPlayerDisplayInfo(
       playerObj
     );
@@ -177,7 +221,6 @@ class PlayerManager {
       style,
       0
     );
-
     return false;
   }
 
@@ -198,63 +241,6 @@ class PlayerManager {
         elo.color
       );
     }
-  }
-
-  async handleAuthCommand(player, message) {
-    const [command, ...args] = message.split(" ");
-    const playerName = player.name;
-    const password = args[0];
-    const confirmPassword = args[1];
-
-    try {
-      if (command === "!register") {
-        if (args.length !== 2) {
-          this.room.sendAnnouncement(
-            "[Server] Usa: !register <contraseña> <contraseña>",
-            player.id,
-            0xb4b4b4
-          );
-          return false;
-        }
-        if (password !== confirmPassword) {
-          this.room.sendAnnouncement(
-            "[Server] Las contraseñas no son iguales.",
-            player.id,
-            0xb4b4b4
-          );
-          return false;
-        }
-        await this.registerPlayer(player, password);
-        this.room.sendAnnouncement(
-          `[Server] ${playerName} se registró correctamente.`,
-          player.id,
-          0xb4b4b4
-        );
-      } else if (command === "!login") {
-        if (args.length !== 1) {
-          this.room.sendAnnouncement(
-            "[Server] Usa: !login <contraseña>",
-            player.id,
-            0xb4b4b4
-          );
-          return false;
-        }
-        await this.loginPlayer(playerName, password);
-        this.room.sendAnnouncement(
-          `[Server] ${playerName} inició sesión correctamente.`,
-          player.id,
-          0xb4b4b4
-        );
-      }
-    } catch (error) {
-      this.room.sendAnnouncement(
-        `Error: ${error.message}`,
-        player.id,
-        0xb4b4b4
-      );
-    }
-
-    return false;
   }
 
   async handleTeamVictory(scores) {
@@ -342,7 +328,6 @@ class PlayerManager {
   }
 
   async loginPlayer(playerName, password) {
-    await this.announcePlayerJoin(playerName);
     const playerObj = this.players.get(playerName);
     if (!playerObj) {
       throw new Error("Jugador no encontrado");
@@ -359,7 +344,9 @@ class PlayerManager {
       throw new Error("Usuario o contraseña incorrectos");
     }
 
+    await this.announcePlayerJoin(playerName);
     playerObj.update({
+      ...playerObj,
       isLogged: true,
     });
     balanceTeams();

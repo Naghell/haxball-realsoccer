@@ -57,9 +57,11 @@ async function initializeRoom() {
       roomName: roomSettings.name || "Default Room Name",
       maxPlayers: roomSettings.max_players || 18,
       public: roomSettings.public === true,
-      noPlayer: true,
+      noPlayer: false,
       token: process.env.HAXBALL_TOKEN,
       password: roomSettings.password || null,
+      playerName: "hax.naghell.com",
+      geo: { code: "AR", lat: -34.6083, lon: -58.3712 },
     };
 
     const HBInit = await HaxballJS;
