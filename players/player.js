@@ -27,6 +27,7 @@ class Player {
     // Server-side auth checks (not stored in DB)
     this.isRegistered = false;
     this.isLogged = false;
+    this.nativeId = data.nativeId || null;
   }
 
   async save() {

@@ -29,53 +29,32 @@ class Game {
     this.lastKickerId;
     this.lastKickerName;
     this.lastKickerTeam;
+    this.lastKickerAvatar;
     this.secondLastKickerId;
     this.secondLastKickerName;
     this.secondLastKickerTeam;
+    this.secondLastKickerAvatar;
     this.redScore = 0;
     this.blueScore = 0;
+    this.lastBallTouch = {};
   }
 
-  updateLastKicker(id, name, team) {
+  updateLastKicker(id, name, team, avatar) {
     this.secondLastKickerId = this.lastKickerId;
     this.secondLastKickerName = this.lastKickerName;
     this.secondLastKickerTeam = this.lastKickerTeam;
+    this.secondLastKickerAvatar = this.lastKickerAvatar;
 
     this.lastKickerId = id;
     this.lastKickerName = name;
     this.lastKickerTeam = team;
+    this.lastKickerAvatar = avatar;
   }
 
   updateGameStatus(room) {
-    this.time = Math.floor(room.getScores().time);
-    this.ballRadius = room.getDiscProperties(0).radius;
+    this.time = Math.floor(room.gameState?.timeElapsed);
+    this.ballRadius = room.gameState?.physicsState.discs[0]?.radius;
     this.ticks++;
-  }
-
-  handleBallTouch(room) {
-    const players = room.getPlayerList();
-    const ballPosition = room.getBallPosition();
-    const playerRadius = 15;
-    const triggerDistance = this.ballRadius + playerRadius + 0.01;
-
-    for (const player of players) {
-      if (player.position == null) continue;
-      const distanceToBall = pointDistance(player.position, ballPosition);
-      if (distanceToBall < triggerDistance) {
-        this.rsTouchTeam = player.team;
-        this.throwinKicked = false;
-
-        if (this.rsCorner == false && room.getDiscProperties(0).xgravity != 0) {
-          room.setDiscProperties(0, { xgravity: 0, ygravity: 0 });
-          this.rsSwingTimer = 10000;
-        }
-      }
-    }
-  }
-
-  realSoccerRef(room) {
-    // Implement the real soccer referee logic here
-    // This function should handle throw-ins, goal kicks, corners, etc.
   }
 }
 

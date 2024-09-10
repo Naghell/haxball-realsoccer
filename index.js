@@ -1,9 +1,10 @@
 require("dotenv").config();
-const HaxballJS = require("haxball.js");
+const abcHaxballAPI = require("node-haxball");
 const PlayerManager = require("./players/playerManager");
 const { loadRanks } = require("./systems/ranks");
 const supabase = require("./database/db");
 const { initializeTriggerActions } = require("./functions/triggerActions");
+const stadiumConfig = require("./systems/stadium");
 
 const SERVER_ID = process.env.SERVER_ID;
 
@@ -34,6 +35,8 @@ async function fetchRoomSettings() {
 }
 
 async function initializeRoom() {
+  const API = abcHaxballAPI();
+  const { Room, Utils } = API;
   console.log("Starting room initialization...");
 
   const isConnected = await testSupabaseConnection();
@@ -54,25 +57,43 @@ async function initializeRoom() {
 
   try {
     const roomConfig = {
-      roomName: roomSettings.name || "Default Room Name",
-      maxPlayers: roomSettings.max_players || 18,
-      public: roomSettings.public === true,
-      noPlayer: false,
+      name: roomSettings.name || "Default Room Name",
+      maxPlayerCount: roomSettings.max_players || 18,
+      showInRoomList: roomSettings.public === true,
+      isHost: true,
       token: process.env.HAXBALL_TOKEN,
       password: roomSettings.password || null,
-      playerName: "hax.naghell.com",
-      geo: { code: "AR", lat: -34.6083, lon: -58.3712 },
     };
 
-    const HBInit = await HaxballJS;
-    const room = HBInit(roomConfig);
+    const room = Room.create(roomConfig, {
+      storage: {
+        player_name: "hax.naghell.com",
+        avatar: "👽",
+        geo: {
+          flag: "AR",
+          lat: -34.5745,
+          lon: -58.3805,
+        },
+      },
+      onSuccess: (room) => {
+        console.log(`Room "${room.name}" created successfully`);
+        const parsedStadium = Utils.parseStadium(
+          JSON.stringify(stadiumConfig),
+          console.warn
+        );
 
-    const playerManager = new PlayerManager(room, SERVER_ID);
+        room.setCurrentStadium(parsedStadium);
+        const playerManager = new PlayerManager(room, SERVER_ID);
 
-    initializeTriggerActions(room, playerManager);
-    // initializeCommands(room, playerManager);
+        initializeTriggerActions(room, playerManager);
 
-    console.log("Room fully initialized");
+        console.log("Room fully initialized");
+      },
+      onError: (error, playerId) => {
+        console.error(`Error for player ${playerId}:`, error);
+        // Handle the error as needed
+      },
+    });
   } catch (error) {
     console.error("Failed to initialize room:", error);
   }

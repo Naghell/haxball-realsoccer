@@ -17,9 +17,10 @@ class PlayerManager {
       name: playerInfo.name,
       auth: playerInfo.auth,
       serverId: this.serverId,
-      id: playerInfo.id,
+      nativeId: playerInfo.id,
     });
-    this.players.set(playerInfo.name, player);
+    this.players?.set(playerInfo.id, player);
+    player.nativeId = playerInfo.id;
 
     await this.sendWelcomeMessage(playerInfo);
     await this.checkExistingPlayerAndNotify(playerInfo);
@@ -43,7 +44,7 @@ class PlayerManager {
   async sendWelcomeMessage(player) {
     const existingPlayer = await this.checkExistingPlayer(player.name);
     if (existingPlayer) {
-      const playerObj = this.getPlayer(player.name);
+      const playerObj = this.getPlayer(player.id);
       playerObj.update({
         ...existingPlayer,
         isRegistered: true,
@@ -53,9 +54,8 @@ class PlayerManager {
           `[Server] 👋 ¡Bienvenido a la comunidad Naghello!\n` +
           `[Server] Tu cuenta está registrada: ${playerObj?.name} (ELO: ${playerObj.elo}).\n\n` +
           `[Server] Usa !info para ver la información del servidor.\n` +
-          `[Server] Para ver las notas del parche más reciente (1.0.0), visita: ds.naghell.com\n` +
-          `[Server] Puedes ver tus estadísticas en la web, visita: hax.naghell.com\n\n`,
-        player.id,
+          `[Server] Para ver las notas del parche más reciente (1.0.0), visita: naghell.com/ds\n` +
+          player.id,
         0xb4b4b4, // Color gris claro
         "normal",
         2
@@ -66,8 +66,7 @@ class PlayerManager {
           `[Server] 👋 ¡Bienvenido a la comunidad Naghello!\n` +
           `[Server] Usa !info para ver la información del servidor.\n` +
           `[Server] Para ver las notas del parche más reciente (1.0.0), visita: ds.naghell.com\n` +
-          `[Server] Puedes ver tus estadísticas en la web, visita: hax.naghell.com\n\n`,
-        player.id,
+          player.id,
         0xb4b4b4, // Color gris claro
         "normal",
         2
@@ -78,7 +77,7 @@ class PlayerManager {
   async checkExistingPlayerAndNotify(player) {
     const existingPlayer = await this.checkExistingPlayer(player.name);
     if (existingPlayer) {
-      const playerObj = this.getPlayer(player.name);
+      const playerObj = this.getPlayer(player.id);
       playerObj.update({
         ...existingPlayer,
         isRegistered: true,
@@ -90,7 +89,7 @@ class PlayerManager {
       );
     } else {
       this.room.sendAnnouncement(
-        `Usa !register para crear una cuenta y no perder tus stats.`,
+        `Usa !register para crear una cuenta y poder jugar.`,
         player.id,
         0xb4b4b4,
         "bold",
@@ -99,13 +98,12 @@ class PlayerManager {
     }
   }
 
-  async announcePlayerJoin(playerName) {
-    const playerObj = this.getPlayer(playerName);
-    if (playerObj && playerObj.isRegistered) {
+  async announcePlayerJoin(player) {
+    if (player && player.isRegistered) {
       const { rankString, color, style, vipPrefix } =
-        await getPlayerDisplayInfo(playerObj);
+        await getPlayerDisplayInfo(player);
       this.room.sendAnnouncement(
-        `[Server] ${vipPrefix}[${rankString}] ${playerName} ha entrado a la sala.`,
+        `[Server] ${vipPrefix}[${rankString}] ${player.name} ha entrado a la sala.`,
         null,
         color,
         style,
@@ -113,7 +111,7 @@ class PlayerManager {
       );
     } else {
       this.room.sendAnnouncement(
-        `${playerName} ha entrado a la sala.`,
+        `${player.name} ha entrado a la sala.`,
         null,
         0xb4b4b4,
         "normal",
@@ -143,21 +141,34 @@ class PlayerManager {
         1
       );
     }
-    this.players.delete(player.name);
+    this.players?.delete(player.name);
   }
 
   async handleChat(player, message) {
-    const playerObj = this.players.get(player.name);
+    const playerObj = this.players?.get(player);
 
     // Comprobar si el jugador está autenticado
     if (!playerObj || !playerObj.isLogged) {
-      return this.handleUnauthenticatedChat(player, message);
+      return this.handleUnauthenticatedChat(playerObj, message);
     }
 
     // Objeto con los comandos y sus funciones correspondientes
     const commands = {
-      "!elo": () => this.handleEloCommand(player.id, playerObj),
+      "!register": null,
+      "!login": null,
+      "!elo": () => this.handleEloCommand(player, playerObj),
+      "!help": () => this.handleHelpCommand(player, Object.keys(commands)),
     };
+
+    // Agregar comandos de staff si el jugador tiene rango de staff
+    if (playerObj.staff_rank_id > 0) {
+      commands["!mute"] = () => this.handleMuteCommand(playerObj, message);
+      commands["!kick"] = () => this.handleKickCommand(playerObj, message);
+
+      if (playerObj.staff_rank_id > 1) {
+        commands["!ban"] = () => this.handleBanCommand(playerObj, message);
+      }
+    }
 
     // Comprobar si el mensaje es un comando
     const command = Object.keys(commands).find((cmd) =>
@@ -172,14 +183,24 @@ class PlayerManager {
     return this.sendFormattedChat(playerObj, message);
   }
 
+  async handleHelpCommand(id, commands) {
+    const commandList = commands.join(", ");
+    return this.room.sendAnnouncement(
+      `[Server] Los comandos disponibles son: ${commandList}`,
+      id,
+      0xb4b4b4
+    );
+  }
+
   handleUnauthenticatedChat(player, message) {
     if (message.startsWith("!register ") || message.startsWith("!login ")) {
-      return this.handleAuthCommand(player, message);
+      this.handleAuthCommand(player, message);
+      return false;
     }
 
     this.room.sendAnnouncement(
       "[Server] Necesitas registrarte (!register) o iniciar sesión (!login) para chatear.",
-      player.id,
+      player.nativeId,
       0xb4b4b4
     );
     return false;
@@ -189,7 +210,7 @@ class PlayerManager {
     const [command, password] = message.split(" ");
     const authHandler = {
       "!register": () => this.registerPlayer(player, password),
-      "!login": () => this.loginPlayer(player.name, password),
+      "!login": () => this.loginPlayer(player, password),
     }[command];
 
     if (authHandler) {
@@ -197,13 +218,13 @@ class PlayerManager {
         await authHandler();
         this.room.sendAnnouncement(
           `[Server] Autenticación exitosa.`,
-          player.id,
+          player.nativeId,
           0x00ff00
         );
       } catch (error) {
         this.room.sendAnnouncement(
           `[Server] Error de autenticación: ${error.message}`,
-          player.id,
+          player.nativeId,
           0xff0000
         );
       }
@@ -244,11 +265,11 @@ class PlayerManager {
   }
 
   async handleTeamVictory(scores) {
-    const players = this.room.getPlayerList();
+    const players = this.room.players;
     for (const player of players) {
       const playerObj = this.getPlayer(player.name);
       if (playerObj && playerObj.isLogged) {
-        const opponent = players.find((p) => p.team !== player.team);
+        const opponent = players?.find((p) => p.team !== player.team);
         const opponentObj = this.getPlayer(opponent.name);
         if (opponentObj && opponentObj.isLogged) {
           const playerScore = player.team === scores.winning ? 1 : 0;
@@ -317,8 +338,7 @@ class PlayerManager {
 
     if (newServerData.error) throw newServerData.error;
 
-    const playerObj = this.players.get(player.name);
-    playerObj.update({
+    player.update({
       ...newPlayer.data,
       ...newServerData.data,
       isRegistered: true,
@@ -327,16 +347,11 @@ class PlayerManager {
     balanceTeams();
   }
 
-  async loginPlayer(playerName, password) {
-    const playerObj = this.players.get(playerName);
-    if (!playerObj) {
-      throw new Error("Jugador no encontrado");
-    }
-
+  async loginPlayer(player, password) {
     const { data, error } = await supabase
       .from("players")
       .select()
-      .eq("name", playerName)
+      .eq("name", player.name)
       .eq("password", password)
       .single();
 
@@ -344,17 +359,158 @@ class PlayerManager {
       throw new Error("Usuario o contraseña incorrectos");
     }
 
-    await this.announcePlayerJoin(playerName);
-    playerObj.update({
-      ...playerObj,
+    await this.announcePlayerJoin(player);
+    player.update({
+      ...player,
       isLogged: true,
     });
     balanceTeams();
-    return playerObj;
+    return player;
   }
 
-  getPlayer(name) {
-    return this.players.get(name);
+  getPlayer(id) {
+    return this.players?.get(Number(id));
+  }
+
+  async handleMuteCommand(staffPlayer, message) {
+    const [_, targetName, duration, ...reasonParts] = message.split(" ");
+    const reason = reasonParts.join(" ");
+    const targetPlayer = this.getPlayerByName(targetName);
+
+    if (!targetPlayer) {
+      return this.room.sendAnnouncement(
+        `[Server] Player ${targetName} not found.`,
+        staffPlayer.nativeId,
+        0xff0000
+      );
+    }
+
+    if (targetPlayer.staff_rank_id >= staffPlayer.staff_rank_id) {
+      return this.room.sendAnnouncement(
+        `[Server] You can't mute a player with equal or higher rank.`,
+        staffPlayer.nativeId,
+        0xff0000
+      );
+    }
+
+    const muteDuration = parseInt(duration) || 5; // Default to 5 minutes if no duration provided
+    const muteEndTime = new Date(Date.now() + muteDuration * 60000);
+
+    targetPlayer.muted = true;
+    await this.updatePlayerInDatabase(targetPlayer, {
+      muted: true,
+      mute_end_time: muteEndTime,
+    });
+
+    this.room.sendAnnouncement(
+      `[Server] ${targetName} has been muted for ${muteDuration} minutes. Reason: ${reason}`,
+      null,
+      0xff0000
+    );
+
+    // Set a timeout to unmute the player
+    setTimeout(() => this.unmutePlayer(targetPlayer), muteDuration * 60000);
+  }
+
+  async handleKickCommand(staffPlayer, message) {
+    const [_, targetName, ...reasonParts] = message.split(" ");
+    const reason = reasonParts.join(" ");
+    const targetPlayer = this.getPlayerByName(targetName);
+
+    if (!targetPlayer) {
+      return this.room.sendAnnouncement(
+        `[Server] Player ${targetName} not found.`,
+        staffPlayer.nativeId,
+        0xff0000
+      );
+    }
+
+    if (targetPlayer.staff_rank_id >= staffPlayer.staff_rank_id) {
+      return this.room.sendAnnouncement(
+        `[Server] You can't kick a player with equal or higher rank.`,
+        staffPlayer.nativeId,
+        0xff0000
+      );
+    }
+
+    this.room.kickPlayer(targetPlayer.nativeId, reason, false);
+    this.room.sendAnnouncement(
+      `[Server] ${targetName} has been kicked. Reason: ${reason}`,
+      null,
+      0xff0000
+    );
+  }
+
+  async handleBanCommand(staffPlayer, message) {
+    const [_, targetName, duration, ...reasonParts] = message.split(" ");
+    const reason = reasonParts.join(" ");
+    const targetPlayer = this.getPlayerByName(targetName);
+
+    if (!targetPlayer) {
+      return this.room.sendAnnouncement(
+        `[Server] Player ${targetName} not found.`,
+        staffPlayer.nativeId,
+        0xff0000
+      );
+    }
+
+    if (targetPlayer.staff_rank_id >= staffPlayer.staff_rank_id) {
+      return this.room.sendAnnouncement(
+        `[Server] You can't ban a player with equal or higher rank.`,
+        staffPlayer.nativeId,
+        0xff0000
+      );
+    }
+
+    const banDuration = parseInt(duration) || 24; // Default to 24 hours if no duration provided
+    const banEndTime = new Date(Date.now() + banDuration * 3600000);
+
+    targetPlayer.banned = true;
+    await this.updatePlayerInDatabase(targetPlayer, {
+      banned: true,
+      ban_end_time: banEndTime,
+    });
+
+    this.room.kickPlayer(
+      targetPlayer.nativeId,
+      `Banned for ${banDuration} hours. Reason: ${reason}`,
+      true
+    );
+    this.room.sendAnnouncement(
+      `[Server] ${targetName} has been banned for ${banDuration} hours. Reason: ${reason}`,
+      null,
+      0xff0000
+    );
+  }
+
+  async unmutePlayer(player) {
+    player.muted = false;
+    await this.updatePlayerInDatabase(player, {
+      muted: false,
+      mute_end_time: null,
+    });
+    this.room.sendAnnouncement(
+      `[Server] ${player.name} has been unmuted.`,
+      null,
+      0x00ff00
+    );
+  }
+
+  getPlayerByName(name) {
+    return Array.from(this.players.values()).find(
+      (player) => player.name.toLowerCase() === name.toLowerCase()
+    );
+  }
+
+  async updatePlayerInDatabase(player, updates) {
+    const { error } = await supabase
+      .from("players")
+      .update(updates)
+      .eq("name", player.name);
+
+    if (error) {
+      console.error(`Error updating player ${player.name} in database:`, error);
+    }
   }
 
   async fetchPlayerData(playerName) {
